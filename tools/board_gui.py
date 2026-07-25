@@ -28,6 +28,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 try:
     import serial
@@ -44,11 +45,11 @@ except ImportError:
 IS_WINDOWS = sys.platform == "win32"
 
 if IS_WINDOWS:
-    UI_FONT, MONO_FONT = "Microsoft YaHei UI", "Consolas"
+    UI_FONT, MONO_FONT = "Microsoft YaHei", "Microsoft YaHei"
 elif sys.platform == "darwin":
-    UI_FONT, MONO_FONT = "PingFang SC", "Menlo"
+    UI_FONT, MONO_FONT = "SF Pro Text", "Menlo"
 else:
-    UI_FONT, MONO_FONT = "Noto Sans CJK SC", "DejaVu Sans Mono"
+    UI_FONT, MONO_FONT = "Sans", "Monospace"
 
 # ---------------------------------------------------------------- 设置持久化
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -149,7 +150,9 @@ def build_command(settings):
     if IS_WINDOWS:
         script = ("cd '%s'; . .\\export.ps1; cd '%s'; python '%s' build"
                   % (sdk, app, tos))
-        return ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+        ps = (shutil.which("powershell")
+              or r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+        return [ps, "-NoProfile", "-ExecutionPolicy", "Bypass",
                 "-Command", script]
     python = sys.executable or "python3"
     script = ("cd '%s' && . ./export.sh && cd '%s' && '%s' '%s' build"
@@ -223,6 +226,14 @@ class BoardGUI(tk.Tk):
         self.title("T5AI Pixel 机器狗控制台")
         self.geometry("880x640")
         self.minsize(760, 560)
+
+        # 全局无衬线字体
+        _style = ttk.Style(self)
+        for cls in ("TLabel", "TButton", "TCheckbutton", "TRadiobutton",
+                    "TCombobox", "TEntry", "TNotebook.Tab", "TLabelframe.Label",
+                    "TFrame", "TLabelframe"):
+            _style.configure(cls, font=(UI_FONT, 10))
+        self.option_add("*Font", (UI_FONT, 10))
 
         self.settings = load_settings()
         self.log_queue = queue.Queue()

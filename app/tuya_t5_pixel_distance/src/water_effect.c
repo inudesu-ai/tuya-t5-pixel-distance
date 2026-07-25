@@ -44,7 +44,7 @@
 #define ABSENCE_CONFIRM_MS           150
 #define SMILE_MAX_MS                 3000
 #define SMILE_RESET_DELAY_MS         1500
-#define HAPPY_AUDIO_VOLUME           85
+#define HAPPY_AUDIO_VOLUME           100
 #define HAPPY_AUDIO_FRAME_BYTES      640
 
 #define STATUS_MENU_TIMEOUT_MS 10000
