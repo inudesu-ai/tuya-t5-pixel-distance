@@ -1,6 +1,6 @@
 /**
  * @file water_effect.c
- * @brief Radar-triggered smile with temperature-controlled color
+ * @brief Robot dog head-petting smile with temperature-controlled color
  *
  * @copyright Copyright (c) 2021-2026 Tuya Inc. All Rights Reserved.
  */
@@ -14,6 +14,9 @@
 #include "board_com_api.h"
 #include "board_pixel_api.h"
 #include "tdl_audio_manage.h"
+#include "tdl_button_manage.h"
+
+#include "mqtt_display.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -33,16 +36,19 @@
 #define ULTRASONIC_TRIG_PIN          TUYA_GPIO_NUM_34
 #define ULTRASONIC_ECHO_PIN          TUYA_GPIO_NUM_35
 #define ULTRASONIC_SAMPLE_MS         100
-#define ULTRASONIC_ECHO_TIMEOUT_US   35000
+#define ULTRASONIC_ECHO_TIMEOUT_US   12000
 #define ULTRASONIC_STALE_MS          2000
-#define ULTRASONIC_ENTER_DISTANCE_CM 45.0f
-#define ULTRASONIC_EXIT_DISTANCE_CM  60.0f
+#define ULTRASONIC_ENTER_DISTANCE_CM 20.0f
+#define ULTRASONIC_EXIT_DISTANCE_CM  35.0f
 #define PRESENCE_CONFIRM_MS          0
-#define ABSENCE_CONFIRM_MS           0
-#define SMILE_MAX_MS                 5000
-#define SMILE_RESET_DELAY_MS         3000
-#define HAPPY_AUDIO_VOLUME           65
+#define ABSENCE_CONFIRM_MS           150
+#define SMILE_MAX_MS                 3000
+#define SMILE_RESET_DELAY_MS         1500
+#define HAPPY_AUDIO_VOLUME           85
 #define HAPPY_AUDIO_FRAME_BYTES      640
+
+#define STATUS_MENU_TIMEOUT_MS 10000
+#define STATUS_BLINK_PERIOD_MS 600
 
 #define BME280_I2C_PORT       TUYA_I2C_NUM_0
 #define BME280_ADDR_PRIMARY   0x76
@@ -74,6 +80,9 @@ static bme280_temp_t        g_bme280                     = {0};
 static uint8_t              g_bitmap[WATER_BITMAP_BYTES] = {0};
 static float                g_temperature_c              = 24.0f;
 static uint32_t             g_frame_count                = 0;
+static TDL_BUTTON_HANDLE    g_ok_button                  = NULL;
+static volatile bool        g_menu_active                = false;
+static volatile uint32_t    g_menu_until_ms              = 0;
 
 extern const unsigned char g_happy_levelup_pcm[];
 extern const unsigned int  g_happy_levelup_pcm_len;
@@ -92,8 +101,12 @@ static OPERATE_RET ultrasonic_init(void);
 static OPERATE_RET ultrasonic_measure(float *distance_cm);
 static OPERATE_RET audio_init(void);
 static void        happy_sound_play(void);
+static void        frame_present(void);
 static void        distance_render(float distance_cm);
 static void        smile_render(void);
+static void        mqtt_pattern_render(MQTT_DISPLAY_CMD_E cmd);
+static void        status_menu_render(void);
+static OPERATE_RET ok_button_init(void);
 static void        user_main(void);
 
 /***********************************************************
@@ -245,7 +258,7 @@ static OPERATE_RET ultrasonic_init(void)
     }
 
     tkl_gpio_write(ULTRASONIC_TRIG_PIN, TUYA_GPIO_LEVEL_LOW);
-    PR_NOTICE("CS100A ready: TRIG=P34 ECHO=P35, enter<%.0fcm exit>%.0fcm", ULTRASONIC_ENTER_DISTANCE_CM,
+    PR_NOTICE("Head petting sensor ready: TRIG=P34 ECHO=P35, pet<%.0fcm release>%.0fcm", ULTRASONIC_ENTER_DISTANCE_CM,
               ULTRASONIC_EXIT_DISTANCE_CM);
     return OPRT_OK;
 }
@@ -382,6 +395,33 @@ static void bitmap_draw_glyph3x5(uint32_t x, uint32_t y, const uint8_t rows[5], 
     }
 }
 
+/* Push g_bitmap to the matrix with WiFi/MQTT indicator pixels in the top corners. */
+static void frame_present(void)
+{
+    MQTT_DISPLAY_STATUS_T status;
+    uint32_t              now_ms   = (uint32_t)tal_system_get_millisecond();
+    bool                  blink_on = (now_ms / STATUS_BLINK_PERIOD_MS) & 1u;
+
+    mqtt_display_get_status(&status);
+
+    /* Top-left: WiFi (green steady / red blink). Top-right: MQTT (cyan steady / orange blink). */
+    if (status.wifi_connected) {
+        bitmap_set_pixel(0, 0, 0, 200, 60);
+    } else if (blink_on) {
+        bitmap_set_pixel(0, 0, 255, 30, 30);
+    }
+    if (status.mqtt_connected) {
+        bitmap_set_pixel(WATER_WIDTH - 1, 0, 0, 160, 255);
+    } else if (blink_on) {
+        bitmap_set_pixel(WATER_WIDTH - 1, 0, 255, 120, 0);
+    }
+
+    board_pixel_frame_clear(g_frame);
+    board_pixel_draw_bitmap(g_frame, 0, 0, g_bitmap, WATER_WIDTH, WATER_HEIGHT);
+    board_pixel_frame_render(g_frame);
+    g_frame_count++;
+}
+
 static void distance_render(float distance_cm)
 {
     static const uint8_t digits[10][5] = {
@@ -435,10 +475,7 @@ static void distance_render(float distance_cm)
 
     bitmap_draw_glyph3x5(12, 20, glyph_c, 1, 170, 190, 210);
     bitmap_draw_glyph3x5(17, 20, glyph_m, 1, 170, 190, 210);
-    board_pixel_frame_clear(g_frame);
-    board_pixel_draw_bitmap(g_frame, 0, 0, g_bitmap, WATER_WIDTH, WATER_HEIGHT);
-    board_pixel_frame_render(g_frame);
-    g_frame_count++;
+    frame_present();
 }
 
 static void smile_render(void)
@@ -497,10 +534,214 @@ static void smile_render(void)
         bitmap_set_pixel(x, 24, 12, 8, 16);
     }
 
-    board_pixel_frame_clear(g_frame);
-    board_pixel_draw_bitmap(g_frame, 0, 0, g_bitmap, WATER_WIDTH, WATER_HEIGHT);
-    board_pixel_frame_render(g_frame);
-    g_frame_count++;
+    frame_present();
+}
+
+static void arrow_render(bool up)
+{
+    uint8_t red   = up ? 40 : 255;
+    uint8_t green = up ? 230 : 150;
+    uint8_t blue  = up ? 90 : 40;
+
+    memset(g_bitmap, 0, sizeof(g_bitmap));
+
+    /* Triangular head spanning 8 rows, widening away from the tip. */
+    for (uint32_t i = 0; i < 8; i++) {
+        uint32_t y = up ? 4 + i : 27 - i;
+        for (uint32_t x = 15 - i; x <= 16 + i; x++) {
+            bitmap_set_pixel(x, y, red, green, blue);
+        }
+    }
+
+    /* Four-pixel-wide shaft. */
+    for (uint32_t y = up ? 12 : 4; y <= (up ? 27u : 19u); y++) {
+        for (uint32_t x = 14; x <= 17; x++) {
+            bitmap_set_pixel(x, y, red, green, blue);
+        }
+    }
+
+    frame_present();
+}
+
+static void turn_render(bool left)
+{
+    uint32_t head_x = left ? 6 : 25;
+
+    memset(g_bitmap, 0, sizeof(g_bitmap));
+
+    /* Upper semicircular ring, radius 8..11 around (15.5, 17.5). */
+    for (uint32_t y = 0; y < WATER_HEIGHT; y++) {
+        for (uint32_t x = 0; x < WATER_WIDTH; x++) {
+            float dx = (float)x - 15.5f;
+            float dy = (float)y - 17.5f;
+            float r2 = dx * dx + dy * dy;
+
+            if (dy <= 0.0f && r2 >= 64.0f && r2 <= 121.0f) {
+                bitmap_set_pixel(x, y, 0, 190, 255);
+            }
+        }
+    }
+
+    /* Downward arrowhead at the arc end shows the rotation direction. */
+    for (uint32_t i = 0; i < 6; i++) {
+        uint32_t half = 5 - i;
+        for (uint32_t x = head_x - half; x <= head_x + half; x++) {
+            bitmap_set_pixel(x, 18 + i, 0, 190, 255);
+        }
+    }
+
+    frame_present();
+}
+
+static void heart_render(void)
+{
+    memset(g_bitmap, 0, sizeof(g_bitmap));
+
+    /* Two round lobes plus a triangular tip form the classic heart. */
+    for (uint32_t y = 0; y < WATER_HEIGHT; y++) {
+        for (uint32_t x = 0; x < WATER_WIDTH; x++) {
+            float dx_l    = (float)x - 10.5f;
+            float dx_r    = (float)x - 21.5f;
+            float dy_lobe = (float)y - 11.0f;
+            bool  in_lobe = dx_l * dx_l + dy_lobe * dy_lobe <= 30.25f || dx_r * dx_r + dy_lobe * dy_lobe <= 30.25f;
+            bool  in_tip  = y >= 12 && y <= 25 && fabsf((float)x - 15.5f) <= (26.0f - (float)y) * 0.82f;
+
+            if (in_lobe || in_tip) {
+                bitmap_set_pixel(x, y, 255, 45, 85);
+            }
+        }
+    }
+
+    /* Small catchlight on the left lobe. */
+    bitmap_set_pixel(8, 8, 255, 190, 205);
+    bitmap_set_pixel(9, 8, 255, 190, 205);
+    bitmap_set_pixel(8, 9, 255, 190, 205);
+
+    frame_present();
+}
+
+static void mqtt_pattern_render(MQTT_DISPLAY_CMD_E cmd)
+{
+    switch (cmd) {
+    case MQTT_DISPLAY_CMD_FORWARD:
+        arrow_render(true);
+        break;
+    case MQTT_DISPLAY_CMD_BACKWARD:
+        arrow_render(false);
+        break;
+    case MQTT_DISPLAY_CMD_TURN_LEFT:
+        turn_render(true);
+        break;
+    case MQTT_DISPLAY_CMD_TURN_RIGHT:
+        turn_render(false);
+        break;
+    case MQTT_DISPLAY_CMD_HEART:
+        heart_render();
+        break;
+    default:
+        break;
+    }
+}
+
+/* OK-key status page: WIFI/MQTT rows with state dots plus the station IP. */
+static void status_menu_render(void)
+{
+    static const uint8_t digits[10][5] = {
+        {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1},
+        {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7},
+    };
+    static const uint8_t glyph_w[5]    = {5, 5, 7, 7, 5};
+    static const uint8_t glyph_i[5]    = {7, 2, 2, 2, 7};
+    static const uint8_t glyph_f[5]    = {7, 4, 7, 4, 4};
+    static const uint8_t glyph_m[5]    = {5, 7, 7, 5, 5};
+    static const uint8_t glyph_q[5]    = {7, 5, 5, 7, 1};
+    static const uint8_t glyph_t[5]    = {7, 2, 2, 2, 2};
+    static const uint8_t glyph_dot[5]  = {0, 0, 0, 0, 2};
+    static const uint8_t glyph_dash[5] = {0, 0, 7, 0, 0};
+    MQTT_DISPLAY_STATUS_T status;
+
+    mqtt_display_get_status(&status);
+    memset(g_bitmap, 0, sizeof(g_bitmap));
+
+    bitmap_draw_glyph3x5(1, 2, glyph_w, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(5, 2, glyph_i, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(9, 2, glyph_f, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(13, 2, glyph_i, 1, 210, 220, 235);
+
+    bitmap_draw_glyph3x5(1, 9, glyph_m, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(5, 9, glyph_q, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(9, 9, glyph_t, 1, 210, 220, 235);
+    bitmap_draw_glyph3x5(13, 9, glyph_t, 1, 210, 220, 235);
+
+    /* 3x3 state dots: green = connected, red = not. */
+    for (uint32_t y = 0; y < 3; y++) {
+        for (uint32_t x = 26; x <= 28; x++) {
+            if (status.wifi_connected) {
+                bitmap_set_pixel(x, 3 + y, 0, 220, 80);
+            } else {
+                bitmap_set_pixel(x, 3 + y, 255, 40, 40);
+            }
+            if (status.mqtt_connected) {
+                bitmap_set_pixel(x, 10 + y, 0, 220, 80);
+            } else {
+                bitmap_set_pixel(x, 10 + y, 255, 40, 40);
+            }
+        }
+    }
+
+    /* Station IP over two 8-char lines (4px glyph pitch). */
+    for (uint32_t i = 0; i < 16 && status.ip[i] != '\0'; i++) {
+        const uint8_t *rows = NULL;
+        char           c    = status.ip[i];
+
+        if (c >= '0' && c <= '9') {
+            rows = digits[c - '0'];
+        } else if (c == '.') {
+            rows = glyph_dot;
+        } else if (c == '-') {
+            rows = glyph_dash;
+        }
+        if (rows != NULL) {
+            bitmap_draw_glyph3x5((i % 8) * 4, i < 8 ? 18 : 25, rows, 1, 120, 200, 160);
+        }
+    }
+
+    frame_present();
+}
+
+static void ok_button_event_cb(char *name, TDL_BUTTON_TOUCH_EVENT_E event, void *argc)
+{
+    if (event != TDL_BUTTON_PRESS_SINGLE_CLICK) {
+        return;
+    }
+    if (g_menu_active) {
+        g_menu_active = false;
+        PR_NOTICE("Status menu closed by OK key");
+    } else {
+        g_menu_until_ms = (uint32_t)tal_system_get_millisecond() + STATUS_MENU_TIMEOUT_MS;
+        g_menu_active   = true;
+        PR_NOTICE("Status menu opened by OK key");
+    }
+}
+
+static OPERATE_RET ok_button_init(void)
+{
+    TDL_BUTTON_CFG_T button_cfg = {
+        .long_start_valid_time     = 3000,
+        .long_keep_timer           = 1000,
+        .button_debounce_time      = 50,
+        .button_repeat_valid_count = 2,
+        .button_repeat_valid_time  = 300,
+    };
+    OPERATE_RET rt = tdl_button_create(BUTTON_NAME, &button_cfg, &g_ok_button);
+
+    if (rt != OPRT_OK) {
+        PR_ERR("OK button create failed: %d", rt);
+        return rt;
+    }
+    tdl_button_event_register(g_ok_button, TDL_BUTTON_PRESS_SINGLE_CLICK, ok_button_event_cb);
+    PR_NOTICE("OK button ready, single click toggles status menu");
+    return OPRT_OK;
 }
 
 static void user_main(void)
@@ -518,8 +759,10 @@ static void user_main(void)
     bool        has_valid_distance       = false;
     bool        ultrasonic_ready         = false;
 
+    MQTT_DISPLAY_CMD_E last_mqtt_cmd = MQTT_DISPLAY_CMD_IDLE;
+
     tal_log_init(TAL_LOG_LEVEL_DEBUG, 1024, (TAL_LOG_OUTPUT_CB)tkl_log_output);
-    PR_NOTICE("Tuya T5AI Pixel CS100A proximity demo");
+    PR_NOTICE("Tuya T5AI Pixel robot dog head-petting demo");
 
     rt = board_register_hardware();
     if (rt != OPRT_OK) {
@@ -531,11 +774,16 @@ static void user_main(void)
     bme280_temp_init();
     ultrasonic_ready = (ultrasonic_init() == OPRT_OK);
     audio_init();
+    ok_button_init();
 
     g_frame = board_pixel_frame_create();
     if (g_frame == NULL) {
         PR_ERR("Pixel frame allocation failed");
         return;
+    }
+
+    if (mqtt_display_start() != OPRT_OK) {
+        PR_ERR("mqtt_display_start failed");
     }
 
     while (1) {
@@ -555,11 +803,11 @@ static void user_main(void)
             OPERATE_RET measure_rt           = ultrasonic_measure(&measured_distance_cm);
             bool        detected             = presence;
 
-            if (measure_rt == OPRT_OK && measured_distance_cm >= 2.0f && measured_distance_cm <= 500.0f) {
+            if (measure_rt == OPRT_OK && measured_distance_cm >= 3.0f && measured_distance_cm <= 100.0f) {
                 if (!has_valid_distance) {
                     distance_cm = measured_distance_cm;
                 } else {
-                    distance_cm = distance_cm * 0.65f + measured_distance_cm * 0.35f;
+                    distance_cm = distance_cm * 0.5f + measured_distance_cm * 0.5f;
                 }
                 has_valid_distance     = true;
                 last_valid_distance_ms = now_ms;
@@ -577,7 +825,7 @@ static void user_main(void)
             uint32_t confirm_ms = presence_candidate ? PRESENCE_CONFIRM_MS : ABSENCE_CONFIRM_MS;
             if (presence != presence_candidate && now_ms - presence_candidate_since >= confirm_ms) {
                 presence = presence_candidate;
-                PR_NOTICE("CS100A proximity: %s, distance=%.1fcm", presence ? "near" : "clear", distance_cm);
+                PR_NOTICE("Head petting: %s, distance=%.1fcm", presence ? "detected" : "clear", distance_cm);
 
                 if (presence) {
                     smile_until_ms = now_ms + SMILE_MAX_MS;
@@ -600,8 +848,26 @@ static void user_main(void)
             last_log_ms = now_ms;
         }
 
-        if ((int32_t)(smile_until_ms - now_ms) > 0) {
+        MQTT_DISPLAY_CMD_E mqtt_cmd = mqtt_display_get_cmd();
+
+        if (mqtt_cmd == MQTT_DISPLAY_CMD_SMILE && last_mqtt_cmd != MQTT_DISPLAY_CMD_SMILE) {
+            happy_sound_play();
+        }
+        last_mqtt_cmd = mqtt_cmd;
+
+        if (g_menu_active && (int32_t)(g_menu_until_ms - now_ms) <= 0) {
+            g_menu_active = false;
+            PR_NOTICE("Status menu timed out");
+        }
+
+        if (g_menu_active) {
+            status_menu_render();
+        } else if ((int32_t)(smile_until_ms - now_ms) > 0) {
             smile_render();
+        } else if (mqtt_cmd == MQTT_DISPLAY_CMD_SMILE) {
+            smile_render();
+        } else if (mqtt_cmd != MQTT_DISPLAY_CMD_IDLE) {
+            mqtt_pattern_render(mqtt_cmd);
         } else {
             distance_render(shown_distance_cm);
         }

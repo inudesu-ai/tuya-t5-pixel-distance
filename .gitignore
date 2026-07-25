@@ -3,3 +3,16 @@
 dist/
 *.log
 
+# TuyaOpen SDK（本地下载，不入库）
+TuyaOpen*/
+
+# 本地日志 / IDE 缓存
+boot_log.txt
+build_log.txt
+.qoder/
+
+# GUI 本地设置与 Python 缓存
+tools/board_gui_settings.json
+__pycache__/
+*.pyc
+
