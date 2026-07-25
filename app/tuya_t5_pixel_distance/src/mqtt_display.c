@@ -6,6 +6,7 @@
  */
 
 #include "mqtt_display.h"
+#include "wifi_credentials.h"
 
 #include "tal_api.h"
 #include "tal_wifi.h"
@@ -16,9 +17,8 @@
 /***********************************************************
 ************************macro define************************
 ***********************************************************/
-#define MQTT_DISPLAY_WIFI_SSID     "ADVX-Players"
-#define MQTT_DISPLAY_WIFI_PSWD     "AdventureX"
-#define MQTT_DISPLAY_BROKER_HOST   "192.168.5.3"
+/* WiFi SSID/password live in the git-ignored wifi_credentials.h. */
+#define MQTT_DISPLAY_BROKER_HOST   "192.168.5.10"
 #define MQTT_DISPLAY_BROKER_PORT   1883
 #define MQTT_DISPLAY_TOPIC         "go2/B42D1000Q5SAKA07/display"
 #define MQTT_DISPLAY_CLIENT_ID     "t5-pixel-display"

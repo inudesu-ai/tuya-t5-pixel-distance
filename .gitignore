@@ -16,3 +16,6 @@ tools/board_gui_settings.json
 __pycache__/
 *.pyc
 
+# 本地 WiFi 凭证（用 wifi_credentials.h.example 作模板）
+wifi_credentials.h
+

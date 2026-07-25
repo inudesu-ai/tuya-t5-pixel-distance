@@ -113,6 +113,11 @@ def mqtt_display_c(settings):
     return os.path.join(settings["app_src_dir"], "mqtt_display.c")
 
 
+def wifi_credentials_h(settings):
+    """git 忽略的本地 WiFi 凭证头文件。"""
+    return os.path.join(settings["app_src_dir"], "wifi_credentials.h")
+
+
 def sdk_app_dir(settings):
     return os.path.join(settings["sdk_root"], settings["sdk_app_subdir"])
 
@@ -161,13 +166,13 @@ def build_command(settings):
 
 
 # ---------------------------------------------------------------- 编译期配置
-# 编译期配置宏 -> (界面标签, 是否字符串)
+# 编译期配置宏 -> (界面标签, 是否字符串, 所在文件: wifi=凭证头文件 / mqtt=mqtt_display.c)
 CONFIG_MACROS = [
-    ("MQTT_DISPLAY_WIFI_SSID", "WiFi 名称 (SSID)", True),
-    ("MQTT_DISPLAY_WIFI_PSWD", "WiFi 密码", True),
-    ("MQTT_DISPLAY_BROKER_HOST", "MQTT Broker 地址", True),
-    ("MQTT_DISPLAY_BROKER_PORT", "MQTT Broker 端口", False),
-    ("MQTT_DISPLAY_TOPIC", "订阅主题 (Topic)", True),
+    ("MQTT_DISPLAY_WIFI_SSID", "WiFi 名称 (SSID)", True, "wifi"),
+    ("MQTT_DISPLAY_WIFI_PSWD", "WiFi 密码", True, "wifi"),
+    ("MQTT_DISPLAY_BROKER_HOST", "MQTT Broker 地址", True, "mqtt"),
+    ("MQTT_DISPLAY_BROKER_PORT", "MQTT Broker 端口", False, "mqtt"),
+    ("MQTT_DISPLAY_TOPIC", "订阅主题 (Topic)", True, "mqtt"),
 ]
 
 # 表情按钮: (payload, 显示文字, 说明)
@@ -182,42 +187,59 @@ EXPRESSIONS = [
 ]
 
 
-def read_config(path):
-    """从 mqtt_display.c 读取当前编译期配置。"""
+def _config_file(settings, file_key):
+    if file_key == "wifi":
+        return wifi_credentials_h(settings)
+    return mqtt_display_c(settings)
+
+
+def read_config(settings):
+    """从 mqtt_display.c / wifi_credentials.h 读取当前编译期配置。"""
     values = {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
-    except OSError:
-        return values
-    for macro, _label, is_str in CONFIG_MACROS:
+    texts = {}
+    for macro, _label, is_str, file_key in CONFIG_MACROS:
+        if file_key not in texts:
+            try:
+                with open(_config_file(settings, file_key), "r", encoding="utf-8") as f:
+                    texts[file_key] = f.read()
+            except OSError:
+                texts[file_key] = ""
         if is_str:
-            m = re.search(r'#define\s+%s\s+"([^"]*)"' % macro, text)
+            m = re.search(r'#define\s+%s\s+"([^"]*)"' % macro, texts[file_key])
         else:
-            m = re.search(r'#define\s+%s\s+(\d+)' % macro, text)
+            m = re.search(r'#define\s+%s\s+(\d+)' % macro, texts[file_key])
         if m:
             values[macro] = m.group(1)
     return values
 
 
-def write_config(path, values):
-    """把新配置写回 mqtt_display.c（工作区源码）。"""
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-    for macro, _label, is_str in CONFIG_MACROS:
-        if macro not in values:
-            continue
-        if is_str:
-            pattern = r'(#define\s+%s\s+)"[^"]*"' % macro
-            repl = r'\g<1>"%s"' % values[macro]
+def write_config(settings, values):
+    """把新配置写回对应源文件；凭证头文件缺失时自动从模板创建。"""
+    wifi_h = wifi_credentials_h(settings)
+    if not os.path.isfile(wifi_h):
+        example = wifi_h + ".example"
+        if os.path.isfile(example):
+            shutil.copy2(example, wifi_h)
         else:
-            pattern = r'(#define\s+%s\s+)\d+' % macro
-            repl = r'\g<1>%s' % values[macro]
-        text, count = re.subn(pattern, repl, text)
-        if count == 0:
-            raise ValueError("未找到宏 %s" % macro)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
+            raise ValueError("缺少 %s（模板 %s 也不存在）" % (wifi_h, example))
+    for file_key in ("wifi", "mqtt"):
+        path = _config_file(settings, file_key)
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        for macro, _label, is_str, key in CONFIG_MACROS:
+            if key != file_key or macro not in values:
+                continue
+            if is_str:
+                pattern = r'(#define\s+%s\s+)"[^"]*"' % macro
+                repl = r'\g<1>"%s"' % values[macro]
+            else:
+                pattern = r'(#define\s+%s\s+)\d+' % macro
+                repl = r'\g<1>%s' % values[macro]
+            text, count = re.subn(pattern, repl, text)
+            if count == 0:
+                raise ValueError("未在 %s 找到宏 %s" % (os.path.basename(path), macro))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text)
 
 
 class BoardGUI(tk.Tk):
@@ -265,7 +287,7 @@ class BoardGUI(tk.Tk):
 
     # ------------------------------------------------------------ 表情控制页
     def _build_expr_tab(self):
-        cfg = read_config(mqtt_display_c(self.settings))
+        cfg = read_config(self.settings)
         top = ttk.LabelFrame(self.tab_expr, text="MQTT 连接")
         top.pack(fill="x", padx=10, pady=8)
 
@@ -375,11 +397,11 @@ class BoardGUI(tk.Tk):
 
     # ------------------------------------------------------------ 设备配置页
     def _build_cfg_tab(self):
-        frame = ttk.LabelFrame(self.tab_cfg, text="编译期配置 (mqtt_display.c)")
+        frame = ttk.LabelFrame(self.tab_cfg, text="编译期配置 (mqtt_display.c + wifi_credentials.h)")
         frame.pack(fill="x", padx=10, pady=8)
-        cfg = read_config(mqtt_display_c(self.settings))
+        cfg = read_config(self.settings)
         self.cfg_vars = {}
-        for row, (macro, label, _is_str) in enumerate(CONFIG_MACROS):
+        for row, (macro, label, _is_str, _file_key) in enumerate(CONFIG_MACROS):
             ttk.Label(frame, text=label + ":").grid(row=row, column=0, padx=6, pady=4, sticky="e")
             var = tk.StringVar(value=cfg.get(macro, ""))
             ttk.Entry(frame, textvariable=var, width=44).grid(row=row, column=1, padx=6, pady=4, sticky="w")
@@ -416,13 +438,13 @@ class BoardGUI(tk.Tk):
         if not port.isdigit():
             messagebox.showerror("参数错误", "Broker 端口必须是数字")
             return False
-        path = mqtt_display_c(self.settings)
         try:
-            write_config(path, values)
+            write_config(self.settings, values)
         except Exception as e:
             messagebox.showerror("保存失败", str(e))
             return False
-        self._cfg_log("配置已写入 %s" % path)
+        self._cfg_log("配置已写入 %s 与 %s" % (mqtt_display_c(self.settings),
+                                              wifi_credentials_h(self.settings)))
         # 同步表情页的连接参数
         self.var_host.set(values["MQTT_DISPLAY_BROKER_HOST"])
         self.var_port.set(values["MQTT_DISPLAY_BROKER_PORT"])
@@ -688,6 +710,8 @@ class BoardGUI(tk.Tk):
              os.path.isdir(s["app_src_dir"])),
             ("mqtt_display.c", mqtt_display_c(s),
              os.path.isfile(mqtt_display_c(s))),
+            ("wifi_credentials.h", wifi_credentials_h(s),
+             os.path.isfile(wifi_credentials_h(s))),
             ("SDK 应用目录", sdk_app_dir(s),
              os.path.isdir(sdk_app_dir(s))),
         ]

@@ -478,64 +478,65 @@ static void distance_render(float distance_cm)
     frame_present();
 }
 
+/* 32x32 smile face converted from smile.png (palette indexed). */
+static const uint8_t smile_png_palette[][3] = {
+    {0, 0, 0},     /* 0: background, LED off */
+    {255, 120, 0}, /* 1: orange rim */
+    {255, 210, 30},/* 2: yellow face */
+    {0, 0, 0},     /* 3: eyes & mouth, LED off */
+};
+
+static const uint8_t smile_png_pixels[32][32] = {
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0},
+    {0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 1, 0, 0, 0},
+    {0, 0, 0, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 2, 1, 0, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0},
+    {0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
+    {0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
+    {0, 0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 2, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 2, 1, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 3, 2, 2, 2, 2, 2, 3, 3, 3, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+};
+
 static void smile_render(void)
 {
-    float    temperature_ratio = clampf((g_temperature_c - 10.0f) / 25.0f, 0.0f, 1.0f);
-    float    hue               = 190.0f * (1.0f - temperature_ratio) + 42.0f * temperature_ratio;
-    uint32_t face_r            = 0;
-    uint32_t face_g            = 0;
-    uint32_t face_b            = 0;
-
-    board_pixel_hsv_to_rgb(hue, 0.84f, 0.88f, &face_r, &face_g, &face_b);
     memset(g_bitmap, 0, sizeof(g_bitmap));
 
-    /* A solid, symmetric 28-pixel face reads clearly on the 32x32 matrix. */
-    for (uint32_t x = 0; x < WATER_WIDTH; x++) {
-        for (uint32_t y = 0; y < WATER_HEIGHT; y++) {
-            float dx        = (float)x - 15.5f;
-            float dy        = (float)y - 15.5f;
-            float distance2 = dx * dx + dy * dy;
-
-            if (distance2 <= 190.0f) {
-                float edge = distance2 > 165.0f ? 0.64f : 1.0f;
-                bitmap_set_pixel(x, y, (uint8_t)((float)face_r * edge), (uint8_t)((float)face_g * edge),
-                                 (uint8_t)((float)face_b * edge));
+    for (uint32_t y = 0; y < WATER_HEIGHT; y++) {
+        for (uint32_t x = 0; x < WATER_WIDTH; x++) {
+            const uint8_t *rgb = smile_png_palette[smile_png_pixels[y][x]];
+            if (rgb[0] != 0 || rgb[1] != 0 || rgb[2] != 0) {
+                bitmap_set_pixel(x, y, rgb[0], rgb[1], rgb[2]);
             }
         }
     }
 
-    /* Dark oval eyes with one bright catchlight. */
-    for (uint32_t y = 9; y <= 13; y++) {
-        for (uint32_t x = 9; x <= 11; x++) {
-            bitmap_set_pixel(x, y, 8, 12, 18);
-            bitmap_set_pixel(31 - x, y, 8, 12, 18);
-        }
-    }
-    bitmap_set_pixel(9, 9, 235, 250, 255);
-    bitmap_set_pixel(22, 9, 235, 250, 255);
-
-    /* Soft symmetric cheeks. */
-    for (uint32_t x = 7; x <= 9; x++) {
-        bitmap_set_pixel(x, 18, 255, 74, 105);
-        bitmap_set_pixel(31 - x, 18, 255, 74, 105);
-    }
-
-    /* A two-pixel-thick upward-curved smile. */
-    static const uint8_t smile_y[] = {18, 19, 20, 21, 22, 23, 23};
-    for (uint32_t i = 0; i < sizeof(smile_y); i++) {
-        uint32_t left_x  = 9 + i;
-        uint32_t right_x = 22 - i;
-        bitmap_set_pixel(left_x, smile_y[i], 12, 8, 16);
-        bitmap_set_pixel(left_x, smile_y[i] + 1, 12, 8, 16);
-        bitmap_set_pixel(right_x, smile_y[i], 12, 8, 16);
-        bitmap_set_pixel(right_x, smile_y[i] + 1, 12, 8, 16);
-    }
-    for (uint32_t x = 13; x <= 18; x++) {
-        bitmap_set_pixel(x, 24, 12, 8, 16);
-    }
-
     frame_present();
 }
+
 
 static void arrow_render(bool up)
 {
@@ -789,6 +790,9 @@ static void user_main(void)
     while (1) {
         uint32_t now_ms = (uint32_t)tal_system_get_millisecond();
 
+        /* Boot default is IDLE; petting may only trigger a smile while no MQTT pattern is active. */
+        MQTT_DISPLAY_CMD_E mqtt_cmd = mqtt_display_get_cmd();
+
         if (now_ms - last_temp_ms >= WATER_TEMP_UPDATE_MS) {
             float measured_temperature = 0.0f;
             if (bme280_temp_read(&measured_temperature) == OPRT_OK) {
@@ -827,11 +831,11 @@ static void user_main(void)
                 presence = presence_candidate;
                 PR_NOTICE("Head petting: %s, distance=%.1fcm", presence ? "detected" : "clear", distance_cm);
 
-                if (presence) {
+                if (presence && mqtt_cmd == MQTT_DISPLAY_CMD_IDLE) {
                     smile_until_ms = now_ms + SMILE_MAX_MS;
                     smile_render();
                     happy_sound_play();
-                } else if ((int32_t)(smile_until_ms - now_ms) > 0) {
+                } else if (!presence && (int32_t)(smile_until_ms - now_ms) > 0) {
                     smile_until_ms = now_ms + SMILE_RESET_DELAY_MS;
                     PR_NOTICE("Smile reset in %u ms", SMILE_RESET_DELAY_MS);
                 }
@@ -848,10 +852,12 @@ static void user_main(void)
             last_log_ms = now_ms;
         }
 
-        MQTT_DISPLAY_CMD_E mqtt_cmd = mqtt_display_get_cmd();
-
         if (mqtt_cmd == MQTT_DISPLAY_CMD_SMILE && last_mqtt_cmd != MQTT_DISPLAY_CMD_SMILE) {
             happy_sound_play();
+        }
+        if (mqtt_cmd != MQTT_DISPLAY_CMD_IDLE && (int32_t)(smile_until_ms - now_ms) > 0) {
+            /* An MQTT pattern preempts a petting smile in progress. */
+            smile_until_ms = now_ms;
         }
         last_mqtt_cmd = mqtt_cmd;
 
@@ -862,12 +868,13 @@ static void user_main(void)
 
         if (g_menu_active) {
             status_menu_render();
-        } else if ((int32_t)(smile_until_ms - now_ms) > 0) {
-            smile_render();
         } else if (mqtt_cmd == MQTT_DISPLAY_CMD_SMILE) {
+            /* MQTT smile stays up until another command arrives; petting cannot cancel it. */
             smile_render();
         } else if (mqtt_cmd != MQTT_DISPLAY_CMD_IDLE) {
             mqtt_pattern_render(mqtt_cmd);
+        } else if ((int32_t)(smile_until_ms - now_ms) > 0) {
+            smile_render();
         } else {
             distance_render(shown_distance_cm);
         }

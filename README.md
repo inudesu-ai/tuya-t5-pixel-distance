@@ -36,13 +36,15 @@ that the ECHO signal can be connected directly to the T5AI GPIO.
 ## MQTT display control
 
 The firmware joins the robot dog's WiFi network and subscribes to its display
-topic. Connection settings live at the top of
-`app/tuya_t5_pixel_distance/src/mqtt_display.c`:
+topic. Broker settings live at the top of
+`app/tuya_t5_pixel_distance/src/mqtt_display.c`; WiFi credentials live in the
+git-ignored `wifi_credentials.h` (copy `wifi_credentials.h.example` next to it
+and fill in your network before building):
 
 | Setting | Value |
 | --- | --- |
-| WiFi SSID / password | `ADVX-Players` / `AdventureX` |
-| Broker | `192.168.5.3:1883` (no auth) |
+| WiFi SSID / password | `wifi_credentials.h` (local only, never committed) |
+| Broker | `192.168.5.10:1883` (no auth) |
 | Topic | `go2/B42D1000Q5SAKA07/display` (QoS 1) |
 
 Payloads map to display patterns:
